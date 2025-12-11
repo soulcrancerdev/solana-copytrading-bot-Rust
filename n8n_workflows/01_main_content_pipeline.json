@@ -1,0 +1,375 @@
+{
+  "name": "AI Content Generation Pipeline",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 3
+            }
+          ]
+        }
+      },
+      "id": "schedule-trigger",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT * FROM business_info ORDER BY created_at DESC LIMIT 1"
+      },
+      "id": "get-business-info",
+      "name": "Get Business Info",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "operation": "complete",
+        "model": "gpt-4",
+        "prompt": "=Research market trends, competitors, and target audience insights for:\n\nCompany: {{$json.company_name}}\nIndustry: {{$json.industry}}\nTarget Audience: {{$json.target_audience}}\n\nProvide detailed analysis with trends, competitor insights, and audience statistics.",
+        "options": {
+          "temperature": 0.7,
+          "maxTokens": 2000
+        }
+      },
+      "id": "ai-researcher",
+      "name": "AI Researcher",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1,
+      "position": [650, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "=INSERT INTO research_data (business_id, market_trends, competitor_analysis, insights) VALUES ({{$json.id}}, '{{$json.research_result}}', '', '') RETURNING *"
+      },
+      "id": "save-research",
+      "name": "Save Research",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [850, 300]
+    },
+    {
+      "parameters": {
+        "operation": "complete",
+        "model": "gpt-4",
+        "prompt": "=Based on this research data:\n\n{{$json.research_data}}\n\nCreate a comprehensive content strategy including:\n1. SMM goals\n2. Content themes\n3. Posting schedule\n4. Target metrics",
+        "options": {
+          "temperature": 0.7
+        }
+      },
+      "id": "ai-marketer",
+      "name": "AI Marketer",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1,
+      "position": [1050, 300]
+    },
+    {
+      "parameters": {
+        "operation": "complete",
+        "model": "gpt-4",
+        "prompt": "=Write a social media post for {{$json.platform}} platform.\n\nTheme: {{$json.theme}}\nStrategy: {{$json.strategy}}\n\nCreate engaging, platform-optimized content. Generate 3 variations for A/B testing.",
+        "options": {
+          "temperature": 0.8,
+          "maxTokens": 1000
+        }
+      },
+      "id": "ai-copywriter",
+      "name": "AI Copywriter",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1,
+      "position": [1250, 300]
+    },
+    {
+      "parameters": {
+        "operation": "image",
+        "prompt": "=Create a professional social media image for: {{$json.content_text}}\n\nStyle: Modern, clean, professional design suitable for social media.",
+        "options": {
+          "size": "1024x1024",
+          "n": 1
+        }
+      },
+      "id": "ai-designer",
+      "name": "AI Designer",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1,
+      "position": [1450, 300]
+    },
+    {
+      "parameters": {
+        "operation": "complete",
+        "model": "gpt-4",
+        "prompt": "=Review this content for:\n1. Brand consistency\n2. Factual accuracy\n3. Stop words\n4. Platform guidelines\n\nContent: {{$json.text_content}}\nBrand Guidelines: {{$json.brand_guidelines}}\n\nRespond with format:\nSTATUS: APPROVED or REJECTED\nREASON: [explanation]",
+        "options": {
+          "temperature": 0.3
+        }
+      },
+      "id": "ai-moderator",
+      "name": "AI Moderator",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1,
+      "position": [1650, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false
+          },
+          "conditions": [
+            {
+              "id": "approval-check",
+              "leftValue": "={{$json.moderation_result}}",
+              "rightValue": "APPROVED",
+              "operator": {
+                "type": "string",
+                "operation": "contains"
+              }
+            }
+          ]
+        }
+      },
+      "id": "check-approval",
+      "name": "Check Approval",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1850, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.telegram.org/bot{{$env.TELEGRAM_BOT_TOKEN}}/sendPhoto",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "chat_id",
+              "value": "={{$env.TELEGRAM_CHAT_ID}}"
+            },
+            {
+              "name": "caption",
+              "value": "={{$json.text_content}}"
+            },
+            {
+              "name": "photo",
+              "value": "={{$json.image_url}}"
+            }
+          ]
+        }
+      },
+      "id": "ai-scheduler",
+      "name": "AI Scheduler (Telegram)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2050, 200]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "=INSERT INTO published_posts (content_id, platform, post_id, published_at) VALUES ({{$json.content_id}}, 'telegram', '{{$json.result.message_id}}', NOW()) RETURNING *"
+      },
+      "id": "save-published",
+      "name": "Save Published Post",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [2250, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=http://localhost:8000/webhook/analytics",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "post_id",
+              "value": "={{$json.id}}"
+            },
+            {
+              "name": "platform",
+              "value": "={{$json.platform}}"
+            }
+          ]
+        }
+      },
+      "id": "trigger-analytics",
+      "name": "Trigger Analytics",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2450, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=http://localhost:8000/webhook/retry-content",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "content_id",
+              "value": "={{$json.content_id}}"
+            },
+            {
+              "name": "rejection_reason",
+              "value": "={{$json.moderation_result}}"
+            }
+          ]
+        }
+      },
+      "id": "retry-content",
+      "name": "Retry Content Generation",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2050, 400]
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Get Business Info",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Business Info": {
+      "main": [
+        [
+          {
+            "node": "AI Researcher",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Researcher": {
+      "main": [
+        [
+          {
+            "node": "Save Research",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Research": {
+      "main": [
+        [
+          {
+            "node": "AI Marketer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Marketer": {
+      "main": [
+        [
+          {
+            "node": "AI Copywriter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Copywriter": {
+      "main": [
+        [
+          {
+            "node": "AI Designer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Designer": {
+      "main": [
+        [
+          {
+            "node": "AI Moderator",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Moderator": {
+      "main": [
+        [
+          {
+            "node": "Check Approval",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Approval": {
+      "main": [
+        [
+          {
+            "node": "AI Scheduler (Telegram)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Retry Content Generation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Scheduler (Telegram)": {
+      "main": [
+        [
+          {
+            "node": "Save Published Post",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Published Post": {
+      "main": [
+        [
+          {
+            "node": "Trigger Analytics",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 0,
+  "updatedAt": "2024-01-01T00:00:00.000Z",
+  "versionId": "1"
+}
+
+
+
